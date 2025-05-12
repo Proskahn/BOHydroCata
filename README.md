@@ -1,160 +1,203 @@
+
 # HydroCata-A API
 
-**HydroCata-A** is a FastAPI-based web API designed to accelerate the optimization process of **Proton Exchange Membrane (PEM) electrolyzer** experiments. It leverages **Bayesian optimization** to guide researchers toward optimal catalyst combinations that maximize hydrogen production efficiency.
-
-## 🎯 Objective
-
-The HydroCata-A API aims to streamline experimental workflows by:
-
-- 📊 Recording experimental data, including:
-  - `x1` — the catalyst ratio (with constraint: `0 ≤ x1 ≤ 1`)
-  - `hydrogen_rate` — the hydrogen production rate (must be a positive float)
-- 🤖 Recommending the next optimal `x1` value using **Bayesian optimization**
-- 💾 Persisting experiments in a **SQLite** database
-- 🔗 Exposing a user-friendly **RESTful API** for integration into automated data pipelines
-
-This tool is ideal for researchers and engineers looking to apply **data-driven optimization** in green hydrogen production using PEM electrolyzers.
+The **HydroCata-A API** is a FastAPI-based platform designed to optimize Proton Exchange Membrane (PEM) electrolyzer experiments. It enables researchers to manage experiments, specify design variables and objectives, record results, and use Bayesian optimization to recommend the next optimal catalyst combination to maximize hydrogen production.
 
 ---
 
-## 🧰 Dependencies
+## 🚀 Objective
 
-The project uses [Poetry](https://python-poetry.org/) for dependency and environment management.
+Accelerate catalyst selection for PEM electrolyzers using a data-driven platform.
 
-### ✅ Runtime
+### 🔑 Key Features
 
-| Package              | Version         | Description                                       |
-|----------------------|-----------------|---------------------------------------------------|
-| `python`             | ^3.10, <3.12    | Required Python version                           |
-| `fastapi`            | >=0.115.12,<0.116.0 | Web framework                                    |
-| `uvicorn`            | >=0.34.2,<0.35.0   | ASGI server                                      |
-| `numpy`              | >=2.2.5,<3.0.0    | Numerical operations                             |
-| `httpx`              | >=0.28.1,<0.29.0  | HTTP client for async calls                      |
-| `pydantic`           | >=2.11.0,<3.0.0   | Data validation and serialization                |
-| `pydantic-settings`  | >=2.9.1,<3.0.0    | Settings management                              |
-| `bayesian-optimization` | ^1.5.1        | Core Bayesian optimizer                          |
-| `scipy`              | ^1.14.1           | Mathematical and scientific computations         |
-| `sqlalchemy`         | ^2.0.36           | ORM for DB management                            |
-| `aiosqlite`          | ^0.20.0           | Async SQLite driver                              |
-
-### 🧪 Development
-
-| Package            | Version         | Purpose                    |
-|--------------------|-----------------|----------------------------|
-| `pytest`           | >=8.3.5,<9.0.0  | Testing framework          |
-| `pytest-asyncio`   | ^0.24.0         | Async support for pytest   |
+- **Experiment Management**: Create isolated, named experiments with metadata.
+- **Design Variables**: Define bounds for variables like catalyst ratios.
+- **Optimization Objectives**: Support for hydrogen production rate (multi-objective coming soon).
+- **Data Recording**: Track inputs and outputs per experiment.
+- **Bayesian Optimization**: Recommends next optimal input (x₁).
+- **Data Retrieval & Deletion**: Manage experiment data with RESTful endpoints.
 
 ---
 
-## 🚀 Getting Started
+## 📦 Necessary Packages
 
-### 1. 📦 Install Poetry (if not already installed)
+Managed via **Poetry**.
 
-```bash
-pip install poetry
-```
+### Runtime Dependencies
 
-### 2. 📁 Clone the Repository
+- `python`: ^3.10, <3.12
+- `fastapi`: >=0.115.12,<0.116.0
+- `uvicorn`: >=0.34.2,<0.35.0
+- `numpy`: >=2.2.5,<3.0.0
+- `httpx`: >=0.28.1,<0.29.0
+- `pydantic`: >=2.11.0,<3.0.0
+- `pydantic-settings`: >=2.9.1,<3.0.0
+- `bayesian-optimization`: ^1.5.1
+- `scipy`: ^1.14.1
+- `sqlalchemy`: ^2.0.36
+- `aiosqlite`: ^0.20.0
+
+### Development Dependencies
+
+- `pytest`: >=8.3.5,<9.0.0
+- `pytest-asyncio`: ^0.24.0
+
+---
+
+## 🛠️ How to Use It
+
+### Prerequisites
+
+- Python 3.10 or 3.11
+- Poetry: `pip install poetry`
+- Compatible OS: macOS, Linux, Windows
+
+### Setup
 
 ```bash
 git clone <repository-url>
-cd BOHydroCata
-```
-
-> 💡 If you’re already in `/Users/zkang/BOHydroCata`, skip this step.
-
-### 3. 🔧 Install Dependencies
-
-```bash
+cd BOHydroCata  # Skip if you're already in /Users/zkang/BOHydroCata
 poetry install
 ```
 
-This will create a virtual environment and install all required packages.
-
-### 4. ✅ Verify Installation
+### Verify Installation
 
 ```bash
-poetry show fastapi uvicorn numpy httpx pydantic pydantic-settings \
-    bayesian-optimization scipy sqlalchemy aiosqlite pytest pytest-asyncio
+poetry show fastapi uvicorn numpy httpx pydantic pydantic-settings bayesian-optimization scipy sqlalchemy aiosqlite pytest pytest-asyncio
 ```
 
-### 5. 🧹 Clear Existing Database (Optional)
-
-To start fresh:
+### Optional: Clear Existing Database Files
 
 ```bash
-rm -f experiments.db test_experiments.db
+rm -f experiments.db test_experiments*.db
 ```
 
 ---
 
 ## ▶️ Running the API
 
-Start the FastAPI application with:
+```bash
+poetry run uvicorn hydrocata.api.main:app --host 0.0.0.0 --port 8000 --reload --log-level debug
+```
+
+**Access:**
+
+- Swagger UI: [http://localhost:8000/docs](http://localhost:8000/docs)
+- CLI or Postman for direct API calls
+
+---
+
+## 📡 API Endpoints
+
+### Create Experiment
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/experiments" \
+-H "Content-Type: application/json" \
+-d '{"name": "anode_catalyst", "comments": "Anode catalyst with IrO2 and RuO2, T=25C, P=1atm"}'
+```
+
+### Add Design Variable
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/experiments/anode_catalyst/variables" \
+-H "Content-Type: application/json" \
+-d '{"name": "ratio of IrO2", "lower_bound": 0.0, "upper_bound": 1.0}'
+```
+
+### Add Objective
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/experiments/anode_catalyst/objectives" \
+-H "Content-Type: application/json" \
+-d '{"name": "hydrogen production rate"}'
+```
+
+### Record Result
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/experiments/anode_catalyst/results" \
+-H "Content-Type: application/json" \
+-d '{"x1": 0.5, "objective_value": 100.0}'
+```
+
+### Get Recommendation
+
+```bash
+curl "http://localhost:8000/api/v1/experiments/anode_catalyst/recommend"
+```
+
+### Get All Experiment Data
+
+```bash
+curl "http://localhost:8000/api/v1/experiments/anode_catalyst"
+```
+
+### Delete Experiment
+
+```bash
+curl -X DELETE "http://localhost:8000/api/v1/experiments/anode_catalyst"
+```
+
+### Health Check
+
+```bash
+curl "http://localhost:8000/health"
+```
+
+---
+
+## ✅ Running Tests
+
+```bash
+poetry run pytest tests/test_api.py -v --log-cli-level=DEBUG
+```
+
+### Tests Cover:
+
+- Experiment creation
+- Adding variables/objectives
+- Recording results
+- Recommendation generation
+- Data retrieval & deletion
+- Health checks
+
+> Tests use temporary databases. Real data in `experiments.db` is safe.
+
+---
+
+## 🧩 Troubleshooting
+
+### API Won't Start?
 
 ```bash
 poetry run uvicorn hydrocata.api.main:app --host 0.0.0.0 --port 8000 --reload --log-level debug
 ```
 
-### Parameters:
+- Check port: `lsof -i :8000`
+- Try a different port: `--port 8080`
 
-- `--host 0.0.0.0`: Makes the server externally accessible
-- `--port 8000`: Change if port is in use
-- `--reload`: Auto-reloads code on save (for development)
-- `--log-level debug`: Enables detailed logging
+### 404 Errors?
 
-### Expected Output
+- Ensure `/api/v1` prefix is used in routes
+- Confirm `main.py` includes:  
+  `app.include_router(experiments.router, prefix="/api/v1")`
 
-```text
-INFO:     Will watch for changes in these directories: ['/Users/zkang/BOHydroCata']
-INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
-INFO:     Started reloader process [12345] using StatReload
-INFO:     Started server process [12347]
-INFO:     Waiting for application startup.
-INFO:     Application startup complete.
-```
+### Database Errors?
 
----
+- Confirm `select`, `delete` imported in `database_storage.py`
+- Clear old DB files: `rm -f experiments.db test_experiments*.db`
 
-## 🧪 API Usage
+### Test Interference?
 
-### 📚 Interactive API Docs
-
-Open [http://localhost:8000/docs](http://localhost:8000/docs) in your browser to explore the endpoints using Swagger UI.
-
-### 📬 Manual Requests
-
-Use `curl`, Postman, or any HTTP client to interact with the following endpoints:
-
-| Endpoint                | Method | Description                                       |
-|-------------------------|--------|---------------------------------------------------|
-| `/api/v1/record`        | POST   | Record an experiment (`x1`, `hydrogen_rate`)      |
-| `/api/v1/recommend`     | GET    | Get recommended next `x1`                         |
-| `/api/v1/experiments`   | GET    | List all recorded experiments                     |
-| `/health`               | GET    | Health check                                      |
+- Use `tmp_path` in tests
+- Ensure tests mock `get_storage`
+- Use unique experiment names
+- Run with debug logs for clarity
 
 ---
 
-## 🧪 Running Tests
+## 📬 Feedback
 
-To run all tests:
-
-```bash
-poetry run pytest
-```
-
----
-
-## 📄 License
-
-This project is provided for research and educational purposes. License to be defined.
-
----
-
-## 🙋‍♀️ Questions?
-
-Open an issue or reach out to the maintainers if you encounter problems or need enhancements!
-
-
-
-
+This API is designed for researchers in **green hydrogen production**. Feedback and contributions are welcome!
