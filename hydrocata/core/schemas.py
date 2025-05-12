@@ -1,23 +1,40 @@
+from typing import List, Optional
+
 from pydantic import BaseModel, Field
 
 
 class ExperimentInput(BaseModel):
-    """Schema for recording an experimental result."""
+    name: str = Field(..., min_length=1)
+    comments: Optional[str] = None
 
-    x1: float = Field(
-        ..., ge=0.0, le=1.0, description="Ratio of LrO2 (between 0 and 1)"
-    )
-    hydrogen_rate: float = Field(..., gt=0.0, description="Hydrogen production rate")
+
+class VariableInput(BaseModel):
+    name: str = Field(..., min_length=1)
+    lower_bound: Optional[float] = None
+    upper_bound: Optional[float] = None
+
+
+class ObjectiveInput(BaseModel):
+    name: str = Field(..., min_length=1)
+
+
+class ResultInput(BaseModel):
+    x1: float = Field(..., ge=0.0)
+    objective_value: float = Field(..., gt=0.0)
 
 
 class ExperimentOutput(BaseModel):
-    """Schema for returning a recorded experimental result."""
+    name: str
+    comments: Optional[str]
+    variables: List[dict]
+    objectives: List[dict]
+    results: List[dict]
 
+
+class ExperimentResultOutput(BaseModel):
     x1: float
-    hydrogen_rate: float
+    objective_value: float
 
 
 class RecommendationOutput(BaseModel):
-    """Schema for recommending the next x1 value."""
-
-    x1: float = Field(..., ge=0.0, le=1.0, description="Recommended ratio of LrO2")
+    x1: float = Field(..., ge=0.0, le=1.0)
