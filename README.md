@@ -1,6 +1,6 @@
 # HydroCata-A API
 
-The HydroCata-A API is a FastAPI-based platform designed to optimize Proton Exchange Membrane (PEM) electrolyzer experiments. It enables researchers to create and manage experiments, specify design variables and objectives, record experimental results (catalyst ratio \( x_1 \) and hydrogen production rate), and use Bayesian optimization to recommend the next optimal catalyst combination for maximizing hydrogen production efficiency. The API uses a SQLite database to store experiment-specific data, ensuring isolation of unrelated variants, and provides a RESTful interface for seamless integration into experimental workflows.
+The HydroCata-A API is a FastAPI-based platform designed to optimize electrolyzer experiments. It enables researchers to create and manage experiments, specify design variables and objectives, record experimental results (catalyst ratio \( x_1 \) and hydrogen production rate), and use Bayesian optimization to recommend the next optimal catalyst combination for maximizing hydrogen production efficiency. The API uses a SQLite database to store experiment-specific data, ensuring isolation of unrelated variants, and provides a RESTful interface for seamless integration into experimental workflows.
 
 ## Objective
 
@@ -53,22 +53,15 @@ poetry install
 
 1. **Clone the Repository** (if applicable):
    ```bash
-   git clone <repository-url>
-   cd BOHydroCata
+   git clone <https://github.com/Proskahn/BOHydroCata>
    ```
-   If you’re in `/Users/zkang/BOHydroCata`, skip this step.
 
 2. **Install Dependencies**:
    ```bash
    poetry install
    ```
 
-3. **Verify Dependencies**:
-   ```bash
-   poetry show fastapi uvicorn numpy httpx pydantic pydantic-settings bayesian-optimization scipy sqlalchemy aiosqlite pytest pytest-asyncio
-   ```
-
-4. **Clear Existing Database Files** (optional, to start fresh):
+3. **Clear Existing Database Files** (optional, to start fresh):
    ```bash
    poetry run python clean_databases.py
    ```
