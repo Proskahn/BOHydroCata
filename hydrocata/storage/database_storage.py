@@ -2,7 +2,7 @@ from sqlalchemy import create_engine, Column, Integer, Float, String, ForeignKey
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.sql import select, delete
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 import aiosqlite
 import logging
 import os
@@ -120,13 +120,11 @@ class DatabaseStorage:
         """Add an experimental result to an experiment, replacing if x1 exists."""
         async with self.AsyncSessionLocal() as session:
             try:
-                # Find the experiment
                 experiment = await session.execute(select(Experiment).filter_by(name=experiment_name))
                 experiment = experiment.scalars().first()
                 if not experiment:
                     raise ValueError(f"Experiment '{experiment_name}' not found")
 
-                # Validate x1 against variable bounds
                 variable = await session.execute(select(Variable).filter_by(experiment_id=experiment.id))
                 variable = variable.scalars().first()
                 if variable:
@@ -135,13 +133,11 @@ class DatabaseStorage:
                     if not (lower <= x1 <= upper):
                         raise ValueError(f"x1={x1} is outside bounds [{lower}, {upper}]")
 
-                # Check for existing result with same x1
                 existing_result = await session.execute(
                     select(Result).filter_by(experiment_id=experiment.id, x1=x1)
                 )
                 existing_result = existing_result.scalars().first()
                 if existing_result:
-                    # Update existing result
                     existing_result.objective_value = objective_value
                     await session.commit()
                     logger.debug(
@@ -151,7 +147,6 @@ class DatabaseStorage:
                         f"Duplicate x1={x1} found for experiment '{experiment_name}'. Replaced with objective_value={objective_value}."
                     )
 
-                # Add new result
                 result = Result(experiment_id=experiment.id, x1=x1, objective_value=objective_value)
                 session.add(result)
                 await session.commit()
@@ -161,6 +156,44 @@ class DatabaseStorage:
             except Exception as e:
                 await session.rollback()
                 logger.error(f"Failed to add result: {str(e)}")
+                raise
+
+    async def delete_experiment_result(self, experiment_name: str, x1: float) -> None:
+        """Delete a specific result for an experiment based on x1."""
+        async with self.AsyncSessionLocal() as session:
+            try:
+                experiment = await session.execute(select(Experiment).filter_by(name=experiment_name))
+                experiment = experiment.scalars().first()
+                if not experiment:
+                    raise ValueError(f"Experiment '{experiment_name}' not found")
+
+                result = await session.execute(
+                    select(Result).filter_by(experiment_id=experiment.id, x1=x1)
+                )
+                result = result.scalars().first()
+                if not result:
+                    raise ValueError(f"Result with x1={x1} not found for experiment '{experiment_name}'")
+
+                await session.execute(
+                    delete(Result).filter_by(experiment_id=experiment.id, x1=x1)
+                )
+                await session.commit()
+                logger.debug(f"Deleted result: x1={x1} for experiment '{experiment_name}'")
+            except Exception as e:
+                await session.rollback()
+                logger.error(f"Failed to delete result: {str(e)}")
+                raise
+
+    async def list_experiments(self) -> List[Dict[str, str]]:
+        """List all experiment names and their comments."""
+        async with self.AsyncSessionLocal() as session:
+            try:
+                experiments = await session.execute(select(Experiment.name, Experiment.comments))
+                experiments = experiments.fetchall()
+                logger.debug(f"Retrieved {len(experiments)} experiments")
+                return [{"name": name, "comments": comments} for name, comments in experiments]
+            except Exception as e:
+                logger.error(f"Failed to list experiments: {str(e)}")
                 raise
 
     async def get_experiments(self, experiment_name: str) -> List[Tuple[float, float]]:
