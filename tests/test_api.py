@@ -141,6 +141,37 @@ async def test_record_experiment_result(dependencies, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_record_duplicate_experiment_result(dependencies, monkeypatch, tmp_path):
+    """Test recording a duplicate x1 result, expecting replacement and error."""
+    storage, optimizer = dependencies
+    def mock_get_storage():
+        return storage
+    def mock_get_optimizer():
+        return optimizer
+    monkeypatch.setattr("hydrocata.api.routers.experiments.get_storage", mock_get_storage)
+    monkeypatch.setattr("hydrocata.api.routers.experiments.get_optimizer", mock_get_optimizer)
+    
+    # Create experiment and variable
+    client.post("/api/v1/experiments", json={"name": "test_exp_3"})
+    client.post("/api/v1/experiments/test_exp_3/variables", json={"name": "ratio of IrO2", "lower_bound": 0.0, "upper_bound": 1.0})
+    
+    # Add initial result
+    response = client.post("/api/v1/experiments/test_exp_3/results", json={"x1": 0.5, "objective_value": 100.0})
+    assert response.status_code == 200
+    assert response.json() == {"x1": 0.5, "objective_value": 100.0}
+    
+    # Add duplicate result
+    response = client.post("/api/v1/experiments/test_exp_3/results", json={"x1": 0.5, "objective_value": 200.0})
+    assert response.status_code == 500  # Due to DuplicateResultError
+    assert "Duplicate x1=0.5 found" in response.json()["detail"]
+    
+    # Verify updated result
+    response = client.get("/api/v1/experiments/test_exp_3")
+    assert response.status_code == 200
+    assert {"x1": 0.5, "objective_value": 200.0} in response.json()["results"]
+
+
+@pytest.mark.asyncio
 async def test_recommend_next(dependencies, monkeypatch):
     """Test recommending the next x1 value."""
     storage, optimizer = dependencies
