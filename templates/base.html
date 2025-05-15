@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HydroCata-A API - {% block title %}{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body class="bg-gray-100 font-sans">
+    <nav class="bg-blue-600 text-white p-4">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-2xl font-bold">HydroCata-A API</h1>
+            <div>
+                <a href="/" class="px-4 hover:underline">Home</a>
+                <a href="/experiments" class="px-4 hover:underline">Experiments</a>
+                <a href="/health" class="px-4 hover:underline">Health Check</a>
+            </div>
+        </div>
+    </nav>
+    <div class="container mx-auto mt-8">
+        {% block content %}
+        {% endblock %}
+    </div>
+    <footer class="bg-gray-800 text-white p-4 mt-8">
+        <div class="container mx-auto text-center">
+            <p>&copy; 2025 HydroCata-A. All rights reserved.</p>
+        </div>
+    </footer>
+    <script src="/static/js/scripts.js"></script>
+</body>
+</html>

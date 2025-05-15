@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}Recommend{% endblock %}
+
+{% block content %}
+<div class="bg-white p-6 rounded-lg shadow-md">
+    <h2 class="text-3xl font-semibold mb-4">Recommend Next Catalyst Ratio</h2>
+    <div class="mb-6">
+        <h3 class="text-xl font-semibold mb-2">Select Experiment</h3>
+        <form id="recommend-form" class="space-y-4">
+            <div>
+                <label for="experiment-name" class="block text-gray-700">Experiment Name</label>
+                <select id="experiment-name" name="experiment_name" class="w-full p-2 border rounded" required>
+                    <option value="">Select an experiment</option>
+                    <!-- Populated by JavaScript -->
+                </select>
+            </div>
+            <button type="submit" class="bg-yellow-600 text-white px-4 py-2 rounded hover:bg-yellow-700">Get Recommendation</button>
+        </form>
+    </div>
+    <div id="recommendation-result" class="mt-4">
+        <!-- Populated by JavaScript -->
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const recommendForm = document.getElementById('recommend-form');
+    const experimentSelect = document.getElementById('experiment-name');
+    const resultDiv = document.getElementById('recommendation-result');
+
+    // Populate experiment dropdown
+    async function fetchExperiments() {
+        try {
+            const response = await fetch('/api/v1/experiments');
+            const data = await response.json();
+            experimentSelect.innerHTML = '<option value="">Select an experiment</option>';
+            data.experiments.forEach(exp => {
+                const option = document.createElement('option');
+                option.value = exp.name;
+                option.textContent = exp.name;
+                experimentSelect.appendChild(option);
+            });
+        } catch (error) {
+            resultDiv.innerHTML = '<p class="text-red-600">Error loading experiments.</p>';
+        }
+    }
+
+    // Form submission
+    recommendForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const formData = new FormData(recommendForm);
+        const experimentName = formData.get('experiment_name');
+        if (!experimentName) {
+            alert('Please select an experiment.');
+            return;
+        }
+        try {
+            const response = await fetch(`/api/v1/experiments/${experimentName}/recommend`);
+            const data = await response.json();
+            resultDiv.innerHTML = `<p class="text-green-600">Recommended x1 for ${experimentName}: ${data.x1}</p>`;
+        } catch (error) {
+            resultDiv.innerHTML = '<p class="text-red-600">Error fetching recommendation.</p>';
+        }
+    });
+
+    // Initial fetch
+    fetchExperiments();
+});
+</script>
+{% endblock %}

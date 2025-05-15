@@ -1,0 +1,392 @@
+{% extends "base.html" %}
+
+{% block title %}Experiments{% endblock %}
+
+{% block content %}
+<div class="bg-white p-6 rounded-lg shadow-md">
+    <h2 class="text-3xl font-semibold mb-4">Manage Experiments</h2>
+
+    <!-- Health Check Status -->
+    <div class="mb-6">
+        <h3 class="text-xl font-semibold mb-2">API Status</h3>
+        <p id="health-status" class="text-gray-700">Checking...</p>
+    </div>
+
+    <!-- Create Experiment Form -->
+    <div class="mb-6">
+        <h3 class="text-xl font-semibold mb-2">Create Experiment</h3>
+        <form id="create-experiment-form" class="space-y-4">
+            <div>
+                <label for="name" class="block text-gray-700">Experiment Name</label>
+                <input type="text" id="name" name="name" class="w-full p-2 border rounded" required>
+            </div>
+            <div>
+                <label for="comments" class="block text-gray-700">Comments</label>
+                <textarea id="comments" name="comments" class="w-full p-2 border rounded"></textarea>
+            </div>
+            <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Create</button>
+        </form>
+    </div>
+
+    <!-- List Experiments -->
+    <div>
+        <h3 class="text-xl font-semibold mb-2">All Experiments</h3>
+        <div id="experiments-list" class="space-y-4">
+            <!-- Populated by JavaScript -->
+        </div>
+        <button id="refresh-experiments" class="mt-4 bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700">Refresh List</button>
+    </div>
+</div>
+
+<!-- Modals -->
+<div id="variable-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center">
+    <div class="bg-white p-6 rounded-lg shadow-lg w-full max-w-md">
+        <h3 class="text-xl font-semibold mb-4">Add Variable</h3>
+        <form id="variable-form">
+            <input type="hidden" id="variable-experiment-name" name="experiment_name">
+            <div class="mb-4">
+                <label for="variable-name" class="block text-gray-700">Variable Name</label>
+                <input type="text" id="variable-name" name="name" class="w-full p-2 border rounded" required>
+            </div>
+            <div class="mb-4">
+                <label for="lower-bound" class="block text-gray-700">Lower Bound</label>
+                <input type="number" id="lower-bound" name="lower_bound" step="any" class="w-full p-2 border rounded">
+            </div>
+            <div class="mb-4">
+                <label for="upper-bound" class="block text-gray-700">Upper Bound</label>
+                <input type="number" id="upper-bound" name="upper_bound" step="any" class="w-full p-2 border rounded">
+            </div>
+            <div class="flex justify-end">
+                <button type="button" id="variable-cancel" class="mr-2 px-4 py-2 text-gray-600 hover:text-gray-800">Cancel</button>
+                <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Add</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="objective-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center">
+    <div class="bg-white p-6 rounded-lg shadow-lg w-full max-w-md">
+        <h3 class="text-xl font-semibold mb-4">Add Objective</h3>
+        <form id="objective-form">
+            <input type="hidden" id="objective-experiment-name" name="experiment_name">
+            <div class="mb-4">
+                <label for="objective-name" class="block text-gray-700">Objective Name</label>
+                <input type="text" id="objective-name" name="name" class="w-full p-2 border rounded" required>
+            </div>
+            <div class="flex justify-end">
+                <button type="button" id="objective-cancel" class="mr-2 px-4 py-2 text-gray-600 hover:text-gray-800">Cancel</button>
+                <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Add</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="result-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center">
+    <div class="bg-white p-6 rounded-lg shadow-lg w-full max-w-md">
+        <h3 class="text-xl font-semibold mb-4">Record Result</h3>
+        <form id="result-form">
+            <input type="hidden" id="result-experiment-name" name="experiment_name">
+            <div class="mb-4">
+                <label for="x1" class="block text-gray-700">x1 (Catalyst Ratio)</label>
+                <input type="number" id="x1" name="x1" step="any" class="w-full p-2 border rounded" required>
+            </div>
+            <div class="mb-4">
+                <label for="objective-value" class="block text-gray-700">Objective Value</label>
+                <input type="number" id="objective-value" name="objective_value" step="any" class="w-full p-2 border rounded" required>
+            </div>
+            <div class="flex justify-end">
+                <button type="button" id="result-cancel" class="mr-2 px-4 py-2 text-gray-600 hover:text-gray-800">Cancel</button>
+                <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Record</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="delete-result-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center">
+    <div class="bg-white p-6 rounded-lg shadow-lg w-full max-w-md">
+        <h3 class="text-xl font-semibold mb-4">Delete Result</h3>
+        <form id="delete-result-form">
+            <input type="hidden" id="delete-result-experiment-name" name="experiment_name">
+            <div class="mb-4">
+                <label for="delete-x1" class="block text-gray-700">x1 (Catalyst Ratio)</label>
+                <input type="number" id="delete-x1" name="x1" step="any" class="w-full p-2 border rounded" required>
+            </div>
+            <div class="flex justify-end">
+                <button type="button" id="delete-result-cancel" class="mr-2 px-4 py-2 text-gray-600 hover:text-gray-800">Cancel</button>
+                <button type="submit" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">Delete</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const createForm = document.getElementById('create-experiment-form');
+    const experimentsList = document.getElementById('experiments-list');
+    const refreshButton = document.getElementById('refresh-experiments');
+    const healthStatus = document.getElementById('health-status');
+
+    const variableModal = document.getElementById('variable-modal');
+    const variableForm = document.getElementById('variable-form');
+    const variableCancel = document.getElementById('variable-cancel');
+
+    const objectiveModal = document.getElementById('objective-modal');
+    const objectiveForm = document.getElementById('objective-form');
+    const objectiveCancel = document.getElementById('objective-cancel');
+
+    const resultModal = document.getElementById('result-modal');
+    const resultForm = document.getElementById('result-form');
+    const resultCancel = document.getElementById('result-cancel');
+
+    const deleteResultModal = document.getElementById('delete-result-modal');
+    const deleteResultForm = document.getElementById('delete-result-form');
+    const deleteResultCancel = document.getElementById('delete-result-cancel');
+
+    // Check health status
+    async function checkHealth() {
+        try {
+            const response = await fetch('/health');
+            const data = await response.json();
+            healthStatus.textContent = `API is ${data.status}`;
+            healthStatus.className = data.status === 'healthy' ? 'text-green-600' : 'text-red-600';
+        } catch (error) {
+            healthStatus.textContent = 'Error checking API status';
+            healthStatus.className = 'text-red-600';
+        }
+    }
+
+    // Fetch and display experiments
+    async function fetchExperiments() {
+        try {
+            const response = await fetch('/api/v1/experiments');
+            const data = await response.json();
+            experimentsList.innerHTML = '';
+            data.experiments.forEach(exp => {
+                const div = document.createElement('div');
+                div.className = 'border p-4 rounded';
+                div.innerHTML = `
+                    <h4 class="text-lg font-semibold">${exp.name}</h4>
+                    <p class="text-gray-600">${exp.comments || 'No comments'}</p>
+                    <div class="mt-2 space-x-2">
+                        <button class="add-variable-btn bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700" data-name="${exp.name}">Add Variable</button>
+                        <button class="add-objective-btn bg-green-600 text-white px-2 py-1 rounded hover:bg-green-700" data-name="${exp.name}">Add Objective</button>
+                        <button class="record-result-btn bg-purple-600 text-white px-2 py-1 rounded hover:bg-purple-700" data-name="${exp.name}">Record Result</button>
+                        <button class="delete-result-btn bg-orange-600 text-white px-2 py-1 rounded hover:bg-orange-700" data-name="${exp.name}">Delete Result</button>
+                        <button class="view-details-btn bg-gray-600 text-white px-2 py-1 rounded hover:bg-gray-700" data-name="${exp.name}">View Details</button>
+                        <button class="recommend-btn bg-yellow-600 text-white px-2 py-1 rounded hover:bg-yellow-700" data-name="${exp.name}">Recommend</button>
+                        <button class="delete-btn bg-red-600 text-white px-2 py-1 rounded hover:bg-red-700" data-name="${exp.name}">Delete</button>
+                    </div>
+                `;
+                experimentsList.appendChild(div);
+            });
+
+            // Add button listeners
+            document.querySelectorAll('.add-variable-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.getElementById('variable-experiment-name').value = btn.dataset.name;
+                    variableModal.classList.remove('hidden');
+                });
+            });
+
+            document.querySelectorAll('.add-objective-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.getElementById('objective-experiment-name').value = btn.dataset.name;
+                    objectiveModal.classList.remove('hidden');
+                });
+            });
+
+            document.querySelectorAll('.record-result-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.getElementById('result-experiment-name').value = btn.dataset.name;
+                    resultModal.classList.remove('hidden');
+                });
+            });
+
+            document.querySelectorAll('.delete-result-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.getElementById('delete-result-experiment-name').value = btn.dataset.name;
+                    deleteResultModal.classList.remove('hidden');
+                });
+            });
+
+            document.querySelectorAll('.view-details-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const name = btn.dataset.name;
+                    try {
+                        const response = await fetch(`/api/v1/experiments/${name}`);
+                        const data = await response.json();
+                        alert(JSON.stringify(data, null, 2)); // Replace with a modal or details page
+                    } catch (error) {
+                        alert('Error fetching experiment details.');
+                    }
+                });
+            });
+
+            document.querySelectorAll('.recommend-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const name = btn.dataset.name;
+                    try {
+                        const response = await fetch(`/api/v1/experiments/${name}/recommend`);
+                        const data = await response.json();
+                        alert(`Recommended x1: ${data.x1}`);
+                    } catch (error) {
+                        alert('Error fetching recommendation.');
+                    }
+                });
+            });
+
+            document.querySelectorAll('.delete-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const name = btn.dataset.name;
+                    if (confirm(`Delete experiment '${name}'?`)) {
+                        await fetch(`/api/v1/experiments/${name}`, { method: 'DELETE' });
+                        fetchExperiments();
+                    }
+                });
+            });
+        } catch (error) {
+            experimentsList.innerHTML = '<p class="text-red-600">Error loading experiments.</p>';
+        }
+    }
+
+    // Create experiment form submission
+    createForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const formData = new FormData(createForm);
+        const data = {
+            name: formData.get('name'),
+            comments: formData.get('comments') || null
+        };
+        try {
+            await fetch('/api/v1/experiments', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            createForm.reset();
+            fetchExperiments();
+        } catch (error) {
+            alert('Error creating experiment.');
+        }
+    });
+
+    // Variable form submission
+    variableForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const formData = new FormData(variableForm);
+        const data = {
+            name: formData.get('name'),
+            lower_bound: formData.get('lower_bound') ? parseFloat(formData.get('lower_bound')) : null,
+            upper_bound: formData.get('upper_bound') ? parseFloat(formData.get('upper_bound')) : null
+        };
+        const experimentName = formData.get('experiment_name');
+        try {
+            await fetch(`/api/v1/experiments/${experimentName}/variables`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            variableForm.reset();
+            variableModal.classList.add('hidden');
+            fetchExperiments();
+        } catch (error) {
+            alert('Error adding variable.');
+        }
+    });
+
+    variableCancel.addEventListener('click', () => {
+        variableForm.reset();
+        variableModal.classList.add('hidden');
+    });
+
+    // Objective form submission
+    objectiveForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const formData = new FormData(objectiveForm);
+        const data = {
+            name: formData.get('name')
+        };
+        const experimentName = formData.get('experiment_name');
+        try {
+            await fetch(`/api/v1/experiments/${experimentName}/objectives`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            objectiveForm.reset();
+            objectiveModal.classList.add('hidden');
+            fetchExperiments();
+        } catch (error) {
+            alert('Error adding objective.');
+        }
+    });
+
+    objectiveCancel.addEventListener('click', () => {
+        objectiveForm.reset();
+        objectiveModal.classList.add('hidden');
+    });
+
+    // Result form submission
+    resultForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const formData = new FormData(resultForm);
+        const data = {
+            x1: parseFloat(formData.get('x1')),
+            objective_value: parseFloat(formData.get('objective_value'))
+        };
+        const experimentName = formData.get('experiment_name');
+        try {
+            await fetch(`/api/v1/experiments/${experimentName}/results`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            resultForm.reset();
+            resultModal.classList.add('hidden');
+            fetchExperiments();
+        } catch (error) {
+            alert('Error recording result.');
+        }
+    });
+
+    resultCancel.addEventListener('click', () => {
+        resultForm.reset();
+        resultModal.classList.add('hidden');
+    });
+
+    // Delete result form submission
+    deleteResultForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const formData = new FormData(deleteResultForm);
+        const data = {
+            x1: parseFloat(formData.get('x1'))
+        };
+        const experimentName = formData.get('experiment_name');
+        try {
+            await fetch(`/api/v1/experiments/${experimentName}/results`, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            deleteResultForm.reset();
+            deleteResultModal.classList.add('hidden');
+            fetchExperiments();
+        } catch (error) {
+            alert('Error deleting result.');
+        }
+    });
+
+    deleteResultCancel.addEventListener('click', () => {
+        deleteResultForm.reset();
+        deleteResultModal.classList.add('hidden');
+    });
+
+    // Refresh experiments list
+    refreshButton.addEventListener('click', fetchExperiments);
+
+    // Initial fetch
+    fetchExperiments();
+    checkHealth();
+});
+</script>
+{% endblock %}
