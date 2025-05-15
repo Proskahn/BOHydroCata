@@ -4,7 +4,7 @@
 
 {% block content %}
 <div class="bg-white p-6 rounded-lg shadow-md">
-    <h2 class="text-3xl font-semibold mb-4">Recommend Next Catalyst Ratio</h2>
+    <h2 class="text-3xl font-semibold mb-4">Recommend Next Variables</h2>
     <div class="mb-6">
         <h3 class="text-xl font-semibold mb-2">Select Experiment</h3>
         <form id="recommend-form" class="space-y-4">
@@ -12,14 +12,14 @@
                 <label for="experiment-name" class="block text-gray-700">Experiment Name</label>
                 <select id="experiment-name" name="experiment_name" class="w-full p-2 border rounded" required>
                     <option value="">Select an experiment</option>
-                    <!-- Populated by JavaScript -->
+                    <!-- Populated by JavaScript with experiment names -->
                 </select>
             </div>
             <button type="submit" class="bg-yellow-600 text-white px-4 py-2 rounded hover:bg-yellow-700">Get Recommendation</button>
         </form>
     </div>
     <div id="recommendation-result" class="mt-4">
-        <!-- Populated by JavaScript -->
+        <!-- Displays recommended values for experiment variables (e.g., temperature: 0.5, pressure: 1.0) -->
     </div>
 </div>
 
@@ -57,10 +57,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         try {
             const response = await fetch(`/api/v1/experiments/${experimentName}/recommend`);
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || 'Error fetching recommendation.');
+            }
             const data = await response.json();
-            resultDiv.innerHTML = `<p class="text-green-600">Recommended x1 for ${experimentName}: ${data.x1}</p>`;
+            const variablesStr = Object.entries(data.variables)
+                .map(([key, value]) => `${key}: ${value}`)
+                .join(', ');
+            resultDiv.innerHTML = `<p class="text-green-600">Recommended variables for ${experimentName}: ${variablesStr}</p>`;
         } catch (error) {
-            resultDiv.innerHTML = '<p class="text-red-600">Error fetching recommendation.</p>';
+            resultDiv.innerHTML = `<p class="text-red-600">${error.message || 'Error fetching recommendation.'}</p>`;
         }
     });
 

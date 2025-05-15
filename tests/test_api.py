@@ -1,57 +1,27 @@
 import pytest
-import os
+import uuid
+import logging
 from fastapi.testclient import TestClient
 from hydrocata.api.main import app
-from hydrocata.storage.database_storage import DatabaseStorage, Base
+from hydrocata.storage.database_storage import DatabaseStorage
 from hydrocata.optimization.bayesian import BayesianOptimizer
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-import aiosqlite
-import logging
+from fastapi import HTTPException
 
-# Set up logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-# Create a TestClient instance for the FastAPI app
 client = TestClient(app)
 
 
 @pytest.fixture(scope="function")
-async def dependencies(tmp_path):
-    """Provide DatabaseStorage and BayesianOptimizer for a test, with reliable database cleanup."""
-    db_file = tmp_path / f"test_experiments_{id(tmp_path)}.db"
-    db_path = f"sqlite:///{db_file}"
-
-    storage = DatabaseStorage(db_path=db_path)
-    optimizer = BayesianOptimizer()
-
-    # Initialize database
-    engine = create_engine(db_path, echo=False)
-    Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
-
-    async_connection = None
-    try:
-        async_connection = await aiosqlite.connect(str(db_file))
-        yield storage, optimizer
-    finally:
-        try:
-            Base.metadata.drop_all(engine)
-            engine.dispose()
-            if async_connection:
-                await async_connection.close()
-            if os.path.exists(db_file):
-                os.remove(db_file)
-                logger.debug(f"Deleted temporary database file: {db_file}")
-        except Exception as e:
-            logger.error(f"Failed to clean up database file {db_file}: {str(e)}")
+async def storage():
+    storage = DatabaseStorage(db_path="sqlite:///experiments.db")
+    yield storage
 
 
 @pytest.mark.asyncio
-async def test_create_experiment(dependencies, monkeypatch, tmp_path):
-    """Test creating a new experiment."""
-    storage, _ = dependencies
+async def test_create_experiment(storage, monkeypatch):
+    experiment_name = f"test_exp_{uuid.uuid4().hex}"
 
     def mock_get_storage():
         return storage
@@ -62,26 +32,24 @@ async def test_create_experiment(dependencies, monkeypatch, tmp_path):
 
     response = client.post(
         "/api/v1/experiments",
-        json={"name": "test_exp", "comments": "Anode catalyst with IrO2 and RuO2"},
+        json={"name": experiment_name, "comments": "Anode catalyst with IrO2 and RuO2"},
     )
     assert response.status_code == 200
     assert response.json() == {
-        "name": "test_exp",
+        "name": experiment_name,
         "comments": "Anode catalyst with IrO2 and RuO2",
     }
 
-    # Clean up: Delete the test experiment
-    try:
-        await storage.delete_experiment("test_exp")
-        logger.debug("Cleaned up test_exp from test_create_experiment")
-    except Exception as e:
-        logger.error(f"Failed to clean up test_exp: {str(e)}")
+    experiments = await storage.list_experiments()
+    assert any(exp["name"] == experiment_name for exp in experiments)
+
+    await storage.delete_experiment(experiment_name)
+    logger.debug(f"Cleaned up {experiment_name}")
 
 
 @pytest.mark.asyncio
-async def test_add_variable(dependencies, monkeypatch, tmp_path):
-    """Test adding a design variable to an experiment."""
-    storage, _ = dependencies
+async def test_create_duplicate_experiment(storage, monkeypatch):
+    experiment_name = f"test_exp_{uuid.uuid4().hex}"
 
     def mock_get_storage():
         return storage
@@ -90,31 +58,74 @@ async def test_add_variable(dependencies, monkeypatch, tmp_path):
         "hydrocata.api.routers.experiments.get_storage", mock_get_storage
     )
 
-    client.post("/api/v1/experiments", json={"name": "test_exp"})
+    response = client.post(
+        "/api/v1/experiments",
+        json={"name": experiment_name, "comments": "First attempt"},
+    )
+    assert response.status_code == 200
 
     response = client.post(
-        "/api/v1/experiments/test_exp/variables",
-        json={"name": "ratio of IrO2", "lower_bound": 0.0, "upper_bound": 1.0},
+        "/api/v1/experiments",
+        json={"name": experiment_name, "comments": "Duplicate attempt"},
+    )
+    assert response.status_code == 500
+    assert "already exists" in response.json().get("detail", "").lower()
+
+    await storage.delete_experiment(experiment_name)
+    logger.debug(f"Cleaned up {experiment_name}")
+
+
+@pytest.mark.asyncio
+async def test_add_variable(storage, monkeypatch):
+    experiment_name = f"test_exp_{uuid.uuid4().hex}"
+
+    def mock_get_storage():
+        return storage
+
+    monkeypatch.setattr(
+        "hydrocata.api.routers.experiments.get_storage", mock_get_storage
+    )
+
+    client.post("/api/v1/experiments", json={"name": experiment_name})
+
+    response = client.post(
+        f"/api/v1/experiments/{experiment_name}/variables",
+        json={"name": "ratio_of_IrO2", "lower_bound": 0.0, "upper_bound": 1.0},
     )
     assert response.status_code == 200
     assert response.json() == {
-        "name": "ratio of IrO2",
+        "name": "ratio_of_IrO2",
         "lower_bound": 0.0,
         "upper_bound": 1.0,
     }
 
-    # Clean up: Delete the test experiment
-    try:
-        await storage.delete_experiment("test_exp")
-        logger.debug("Cleaned up test_exp from test_add_variable")
-    except Exception as e:
-        logger.error(f"Failed to clean up test_exp: {str(e)}")
+    response = client.post(
+        f"/api/v1/experiments/{experiment_name}/variables",
+        json={"name": "ratio_of_RuO2", "lower_bound": 0.0, "upper_bound": 1.0},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "name": "ratio_of_RuO2",
+        "lower_bound": 0.0,
+        "upper_bound": 1.0,
+    }
+
+    details = await storage.get_experiment_details(experiment_name)
+    assert len(details["variables"]) == 2
+    assert {"name": "ratio_of_IrO2", "lower_bound": 0.0, "upper_bound": 1.0} in details[
+        "variables"
+    ]
+    assert {"name": "ratio_of_RuO2", "lower_bound": 0.0, "upper_bound": 1.0} in details[
+        "variables"
+    ]
+
+    await storage.delete_experiment(experiment_name)
+    logger.debug(f"Cleaned up {experiment_name}")
 
 
 @pytest.mark.asyncio
-async def test_add_objective(dependencies, monkeypatch, tmp_path):
-    """Test adding an objective to an experiment."""
-    storage, _ = dependencies
+async def test_add_objective(storage, monkeypatch):
+    experiment_name = f"test_exp_{uuid.uuid4().hex}"
 
     def mock_get_storage():
         return storage
@@ -123,33 +134,41 @@ async def test_add_objective(dependencies, monkeypatch, tmp_path):
         "hydrocata.api.routers.experiments.get_storage", mock_get_storage
     )
 
-    client.post("/api/v1/experiments", json={"name": "test_exp2"})
+    client.post("/api/v1/experiments", json={"name": experiment_name})
 
     response = client.post(
-        "/api/v1/experiments/test_exp2/objectives",
-        json={"name": "hydrogen production rate"},
+        f"/api/v1/experiments/{experiment_name}/objectives",
+        json={"name": "hydrogen_production_rate"},
     )
     assert response.status_code == 200
-    assert response.json() == {"name": "hydrogen production rate"}
+    assert response.json() == {"name": "hydrogen_production_rate"}
 
-    # Clean up: Delete the test experiment
-    try:
-        await storage.delete_experiment("test_exp2")
-        logger.debug("Cleaned up test_exp2 from test_add_objective")
-    except Exception as e:
-        logger.error(f"Failed to clean up test_exp2: {str(e)}")
+    details = await storage.get_experiment_details(experiment_name)
+    assert {"name": "hydrogen_production_rate"} in details["objectives"]
+
+    await storage.delete_experiment(experiment_name)
+    logger.debug(f"Cleaned up {experiment_name}")
 
 
 @pytest.mark.asyncio
-async def test_record_experiment_result(dependencies, monkeypatch, tmp_path):
-    """Test recording an experimental result."""
-    storage, optimizer = dependencies
+async def test_record_experiment_result(storage, monkeypatch):
+    experiment_name = f"test_exp_{uuid.uuid4().hex}"
 
     def mock_get_storage():
         return storage
 
-    def mock_get_optimizer():
-        return optimizer
+    async def mock_get_optimizer(
+        experiment_name: str, storage: DatabaseStorage = mock_get_storage()
+    ):
+        details = await storage.get_experiment_details(experiment_name)
+        pbounds = {
+            var["name"]: (
+                var["lower_bound"] if var["lower_bound"] is not None else 0.0,
+                var["upper_bound"] if var["upper_bound"] is not None else 1.0,
+            )
+            for var in details["variables"]
+        }
+        return BayesianOptimizer(pbounds=pbounds)
 
     monkeypatch.setattr(
         "hydrocata.api.routers.experiments.get_storage", mock_get_storage
@@ -158,79 +177,161 @@ async def test_record_experiment_result(dependencies, monkeypatch, tmp_path):
         "hydrocata.api.routers.experiments.get_optimizer", mock_get_optimizer
     )
 
-    client.post("/api/v1/experiments", json={"name": "test_exp3"})
+    client.post("/api/v1/experiments", json={"name": experiment_name})
     client.post(
-        "/api/v1/experiments/test_exp3/variables",
-        json={"name": "ratio of IrO2", "lower_bound": 0.0, "upper_bound": 1.0},
+        f"/api/v1/experiments/{experiment_name}/variables",
+        json={"name": "ratio_of_IrO2", "lower_bound": 0.0, "upper_bound": 1.0},
+    )
+    client.post(
+        f"/api/v1/experiments/{experiment_name}/variables",
+        json={"name": "ratio_of_RuO2", "lower_bound": 0.0, "upper_bound": 1.0},
     )
 
     response = client.post(
-        "/api/v1/experiments/test_exp3/results",
-        json={"x1": 0.5, "objective_value": 100.0},
+        f"/api/v1/experiments/{experiment_name}/results",
+        json={
+            "variables": {"ratio_of_IrO2": 0.5, "ratio_of_RuO2": 0.3},
+            "objective_value": 100.0,
+        },
     )
     assert response.status_code == 200
-    assert response.json() == {"x1": 0.5, "objective_value": 100.0}
+    assert response.json() == {
+        "variables": {"ratio_of_IrO2": 0.5, "ratio_of_RuO2": 0.3},
+        "objective_value": 100.0,
+    }
 
-    # Clean up: Delete the test experiment
-    try:
-        await storage.delete_experiment("test_exp3")
-        logger.debug("Cleaned up test_exp from test_record_experiment_result")
-    except Exception as e:
-        logger.error(f"Failed to clean up test_exp3: {str(e)}")
+    details = await storage.get_experiment_details(experiment_name)
+    assert {
+        "variables": {"ratio_of_IrO2": 0.5, "ratio_of_RuO2": 0.3},
+        "objective_value": 100.0,
+    } in details["results"]
+
+    await storage.delete_experiment(experiment_name)
+    logger.debug(f"Cleaned up {experiment_name}")
 
 
 @pytest.mark.asyncio
-async def test_delete_experiment_result(dependencies, monkeypatch, tmp_path):
-    """Test deleting a specific experiment result."""
-    storage, _ = dependencies
+async def test_record_invalid_variable_result(storage, monkeypatch):
+    experiment_name = f"test_exp_{uuid.uuid4().hex}"
 
     def mock_get_storage():
         return storage
 
+    def mock_get_optimizer(
+        experiment_name: str, storage: DatabaseStorage = mock_get_storage()
+    ):
+        return BayesianOptimizer(pbounds={"ratio_of_IrO2": (0.0, 1.0)})
+
     monkeypatch.setattr(
         "hydrocata.api.routers.experiments.get_storage", mock_get_storage
     )
-
-    client.post("/api/v1/experiments", json={"name": "test_exp4"})
-    client.post(
-        "/api/v1/experiments/test_exp4/variables",
-        json={"name": "ratio of IrO2", "lower_bound": 0.0, "upper_bound": 1.0},
-    )
-    client.post(
-        "/api/v1/experiments/test_exp4/results",
-        json={"x1": 0.5, "objective_value": 100.0},
+    monkeypatch.setattr(
+        "hydrocata.api.routers.experiments.get_optimizer", mock_get_optimizer
     )
 
-    response = client.get("/api/v1/experiments/test_exp4")
+    client.post("/api/v1/experiments", json={"name": experiment_name})
+    client.post(
+        f"/api/v1/experiments/{experiment_name}/variables",
+        json={"name": "ratio_of_IrO2", "lower_bound": 0.0, "upper_bound": 1.0},
+    )
+
+    response = client.post(
+        f"/api/v1/experiments/{experiment_name}/results",
+        json={
+            "variables": {"undefined_var": 0.5},
+            "objective_value": 100.0,
+        },
+    )
+    assert response.status_code == 500
+    assert "not defined" in response.json().get("detail", "").lower()
+
+    response = client.post(
+        f"/api/v1/experiments/{experiment_name}/results",
+        json={
+            "variables": {"ratio_of_IrO2": 1.5},
+            "objective_value": 100.0,
+        },
+    )
+    assert response.status_code == 500
+    assert "outside bounds" in response.json().get("detail", "").lower()
+
+    await storage.delete_experiment(experiment_name)
+    logger.debug(f"Cleaned up {experiment_name}")
+
+
+@pytest.mark.asyncio
+async def test_delete_experiment_result(storage, monkeypatch):
+    experiment_name = f"test_exp_{uuid.uuid4().hex}"
+
+    def mock_get_storage():
+        return storage
+
+    def mock_get_optimizer(
+        experiment_name: str, storage: DatabaseStorage = mock_get_storage()
+    ):
+        return BayesianOptimizer(
+            pbounds={"ratio_of_IrO2": (0.0, 1.0), "ratio_of_RuO2": (0.0, 1.0)}
+        )
+
+    monkeypatch.setattr(
+        "hydrocata.api.routers.experiments.get_storage", mock_get_storage
+    )
+    monkeypatch.setattr(
+        "hydrocata.api.routers.experiments.get_optimizer", mock_get_optimizer
+    )
+
+    client.post("/api/v1/experiments", json={"name": experiment_name})
+    client.post(
+        f"/api/v1/experiments/{experiment_name}/variables",
+        json={"name": "ratio_of_IrO2", "lower_bound": 0.0, "upper_bound": 1.0},
+    )
+    client.post(
+        f"/api/v1/experiments/{experiment_name}/variables",
+        json={"name": "ratio_of_RuO2", "lower_bound": 0.0, "upper_bound": 1.0},
+    )
+    client.post(
+        f"/api/v1/experiments/{experiment_name}/results",
+        json={
+            "variables": {"ratio_of_IrO2": 0.5, "ratio_of_RuO2": 0.3},
+            "objective_value": 100.0,
+        },
+    )
+
+    response = client.get(f"/api/v1/experiments/{experiment_name}")
+    logger.debug(f"Get experiment response: {response.json()}")
     assert response.status_code == 200
-    assert {"x1": 0.5, "objective_value": 100.0} in response.json()["results"]
+    assert {
+        "variables": {"ratio_of_IrO2": 0.5, "ratio_of_RuO2": 0.3},
+        "objective_value": 100.0,
+    } in response.json()["results"]
 
     response = client.request(
-        "DELETE", "/api/v1/experiments/test_exp4/results", json={"x1": 0.5}
+        "DELETE",
+        f"/api/v1/experiments/{experiment_name}/results",
+        json={"variables": {"ratio_of_IrO2": 0.5, "ratio_of_RuO2": 0.3}},
     )
-
     assert response.status_code == 200
     assert (
         response.json().get("message")
-        == "Result x1=0.5 deleted for experiment 'test_exp4'"
+        == f"Result variables={{'ratio_of_IrO2': 0.5, 'ratio_of_RuO2': 0.3}} deleted for experiment '{experiment_name}'"
     )
 
-    response = client.get("/api/v1/experiments/test_exp4")
+    response = client.get(f"/api/v1/experiments/{experiment_name}")
+    logger.debug(f"Get experiment after delete response: {response.json()}")
     assert response.status_code == 200
-    assert {"x1": 0.5, "objective_value": 100.0} not in response.json()["results"]
+    assert {
+        "variables": {"ratio_of_IrO2": 0.5, "ratio_of_RuO2": 0.3},
+        "objective_value": 100.0,
+    } not in response.json()["results"]
 
-    # Clean up: Delete the test experiment
-    try:
-        await storage.delete_experiment("test_exp4")
-        logger.debug("Cleaned up test_exp4 from test_delete_experiment_result")
-    except Exception as e:
-        logger.error(f"Failed to clean up test_exp4: {str(e)}")
+    await storage.delete_experiment(experiment_name)
+    logger.debug(f"Cleaned up {experiment_name}")
 
 
 @pytest.mark.asyncio
-async def test_list_experiments(dependencies, monkeypatch, tmp_path):
-    """Test listing all experiment names and comments."""
-    storage, _ = dependencies
+async def test_list_experiments(storage, monkeypatch):
+    experiment_name1 = f"test_exp_{uuid.uuid4().hex}"
+    experiment_name2 = f"test_exp_{uuid.uuid4().hex}"
 
     def mock_get_storage():
         return storage
@@ -240,37 +341,44 @@ async def test_list_experiments(dependencies, monkeypatch, tmp_path):
     )
 
     client.post(
-        "/api/v1/experiments", json={"name": "exp5", "comments": "Experiment 1"}
+        "/api/v1/experiments",
+        json={"name": experiment_name1, "comments": "Experiment 1"},
     )
     client.post(
-        "/api/v1/experiments", json={"name": "exp6", "comments": "Experiment 2"}
+        "/api/v1/experiments",
+        json={"name": experiment_name2, "comments": "Experiment 2"},
     )
 
     response = client.get("/api/v1/experiments")
     assert response.status_code == 200
     data = response.json()["experiments"]
-    assert {"comments": "Experiment 1", "name": "exp5"} in data
-    assert {"comments": "Experiment 2", "name": "exp6"} in data
+    assert {"name": experiment_name1, "comments": "Experiment 1"} in data
+    assert {"name": experiment_name2, "comments": "Experiment 2"} in data
 
-    # Clean up: Delete the test experiments
-    try:
-        await storage.delete_experiment("exp5")
-        await storage.delete_experiment("exp6")
-        logger.debug("Cleaned up exp1 and exp5 from test_list_experiments")
-    except Exception as e:
-        logger.error(f"Failed to clean up exp1 or exp6: {str(e)}")
+    await storage.delete_experiment(experiment_name1)
+    await storage.delete_experiment(experiment_name2)
+    logger.debug(f"Cleaned up {experiment_name1}, {experiment_name2}")
 
 
 @pytest.mark.asyncio
-async def test_recommend_next(dependencies, monkeypatch, tmp_path):
-    """Test recommending the next x1 value."""
-    storage, optimizer = dependencies
+async def test_recommend_next(storage, monkeypatch):
+    experiment_name = f"test_exp_{uuid.uuid4().hex}"
 
     def mock_get_storage():
         return storage
 
-    def mock_get_optimizer():
-        return optimizer
+    async def mock_get_optimizer(
+        experiment_name: str, storage: DatabaseStorage = mock_get_storage()
+    ):
+        details = await storage.get_experiment_details(experiment_name)
+        pbounds = {
+            var["name"]: (
+                var["lower_bound"] if var["lower_bound"] is not None else 0.0,
+                var["upper_bound"] if var["upper_bound"] is not None else 1.0,
+            )
+            for var in details["variables"]
+        }
+        return BayesianOptimizer(pbounds=pbounds)
 
     monkeypatch.setattr(
         "hydrocata.api.routers.experiments.get_storage", mock_get_storage
@@ -279,121 +387,212 @@ async def test_recommend_next(dependencies, monkeypatch, tmp_path):
         "hydrocata.api.routers.experiments.get_optimizer", mock_get_optimizer
     )
 
-    client.post("/api/v1/experiments", json={"name": "test_exp7"})
+    client.post("/api/v1/experiments", json={"name": experiment_name})
     client.post(
-        "/api/v1/experiments/test_exp7/variables",
-        json={"name": "ratio of IrO2", "lower_bound": 0.0, "upper_bound": 1.0},
+        f"/api/v1/experiments/{experiment_name}/variables",
+        json={"name": "ratio_of_IrO2", "lower_bound": 0.0, "upper_bound": 1.0},
     )
     client.post(
-        "/api/v1/experiments/test_exp7/results",
-        json={"x1": 0.3, "objective_value": 80.0},
+        f"/api/v1/experiments/{experiment_name}/variables",
+        json={"name": "ratio_of_RuO2", "lower_bound": 0.0, "upper_bound": 1.0},
     )
     client.post(
-        "/api/v1/experiments/test_exp7/results",
-        json={"x1": 0.7, "objective_value": 120.0},
+        f"/api/v1/experiments/{experiment_name}/results",
+        json={
+            "variables": {"ratio_of_IrO2": 0.3, "ratio_of_RuO2": 0.2},
+            "objective_value": 80.0,
+        },
+    )
+    client.post(
+        f"/api/v1/experiments/{experiment_name}/results",
+        json={
+            "variables": {"ratio_of_IrO2": 0.7, "ratio_of_RuO2": 0.4},
+            "objective_value": 120.0,
+        },
     )
 
-    response = client.get("/api/v1/experiments/test_exp7/recommend")
+    response = client.get(f"/api/v1/experiments/{experiment_name}/recommend")
     assert response.status_code == 200
-    x1 = response.json()["x1"]
-    assert 0.0 <= x1 <= 1.0
+    variables = response.json()["variables"]
+    assert "ratio_of_IrO2" in variables
+    assert "ratio_of_RuO2" in variables
+    assert 0.0 <= variables["ratio_of_IrO2"] <= 1.0
+    assert 0.0 <= variables["ratio_of_RuO2"] <= 1.0
 
-    # Clean up: Delete the test experiment
-    try:
-        await storage.delete_experiment("test_exp7")
-        logger.debug("Cleaned up test_exp7 from test_recommend_next")
-    except Exception as e:
-        logger.error(f"Failed to clean up test_exp7: {str(e)}")
+    await storage.delete_experiment(experiment_name)
+    logger.debug(f"Cleaned up {experiment_name}")
 
 
 @pytest.mark.asyncio
-async def test_get_experiment(dependencies, monkeypatch, tmp_path):
-    """Test retrieving experiment details."""
-    storage, _ = dependencies
+async def test_recommend_no_variables(storage, monkeypatch):
+    experiment_name = f"test_exp_{uuid.uuid4().hex}"
 
     def mock_get_storage():
         return storage
 
+    async def mock_get_optimizer(
+        experiment_name: str, storage: DatabaseStorage = mock_get_storage()
+    ):
+        details = await storage.get_experiment_details(experiment_name)
+        pbounds = {
+            var["name"]: (
+                var["lower_bound"] if var["lower_bound"] is not None else 0.0,
+                var["upper_bound"] if var["upper_bound"] is not None else 1.0,
+            )
+            for var in details["variables"]
+        }
+        if not pbounds:
+            raise HTTPException(
+                status_code=400, detail="No variables defined for experiment"
+            )
+        return BayesianOptimizer(pbounds=pbounds)
+
     monkeypatch.setattr(
         "hydrocata.api.routers.experiments.get_storage", mock_get_storage
     )
+    monkeypatch.setattr(
+        "hydrocata.api.routers.experiments.get_optimizer", mock_get_optimizer
+    )
 
+    client.post("/api/v1/experiments", json={"name": experiment_name})
+
+    response = client.get(f"/api/v1/experiments/{experiment_name}/recommend")
+    logger.debug(f"Recommend no variables response: {response.json()}")
+    assert response.status_code == 400
+    assert "no variables defined" in response.json().get("detail", "").lower()
+
+    await storage.delete_experiment(experiment_name)
+    logger.debug(f"Cleaned up {experiment_name}")
+
+
+@pytest.mark.asyncio
+async def test_get_experiment(storage, monkeypatch):
+    experiment_name = f"test_exp_{uuid.uuid4().hex}"
     comments = "Test experiment for get"
-    client.post("/api/v1/experiments", json={"name": "test_exp8", "comments": comments})
-    client.post(
-        "/api/v1/experiments/test_exp8/variables",
-        json={"name": "ratio of IrO2", "lower_bound": 0.0, "upper_bound": 1.0},
+
+    def mock_get_storage():
+        return storage
+
+    def mock_get_optimizer(
+        experiment_name: str, storage: DatabaseStorage = mock_get_storage()
+    ):
+        return BayesianOptimizer(
+            pbounds={"ratio_of_IrO2": (0.0, 1.0), "ratio_of_RuO2": (0.0, 1.0)}
+        )
+
+    monkeypatch.setattr(
+        "hydrocata.api.routers.experiments.get_storage", mock_get_storage
     )
-    client.post(
-        "/api/v1/experiments/test_exp8/objectives",
-        json={"name": "hydrogen production rate"},
-    )
-    client.post(
-        "/api/v1/experiments/test_exp8/results",
-        json={"x1": 0.5, "objective_value": 100.0},
+    monkeypatch.setattr(
+        "hydrocata.api.routers.experiments.get_optimizer", mock_get_optimizer
     )
 
-    response = client.get("/api/v1/experiments/test_exp8")
+    client.post(
+        "/api/v1/experiments", json={"name": experiment_name, "comments": comments}
+    )
+    client.post(
+        f"/api/v1/experiments/{experiment_name}/variables",
+        json={"name": "ratio_of_IrO2", "lower_bound": 0.0, "upper_bound": 1.0},
+    )
+    client.post(
+        f"/api/v1/experiments/{experiment_name}/variables",
+        json={"name": "ratio_of_RuO2", "lower_bound": 0.0, "upper_bound": 1.0},
+    )
+    client.post(
+        f"/api/v1/experiments/{experiment_name}/objectives",
+        json={"name": "hydrogen_production_rate"},
+    )
+    client.post(
+        f"/api/v1/experiments/{experiment_name}/results",
+        json={
+            "variables": {"ratio_of_IrO2": 0.5, "ratio_of_RuO2": 0.3},
+            "objective_value": 100.0,
+        },
+    )
+
+    response = client.get(f"/api/v1/experiments/{experiment_name}")
+    logger.debug(f"Get experiment response: {response.json()}")
     assert response.status_code == 200
     data = response.json()
-    assert data["name"] == "test_exp8"
+    assert data["name"] == experiment_name
     assert data["comments"] == comments
-    assert {"name": "ratio of IrO2", "lower_bound": 0.0, "upper_bound": 1.0} in data[
+    assert {"name": "ratio_of_IrO2", "lower_bound": 0.0, "upper_bound": 1.0} in data[
         "variables"
     ]
-    assert {"name": "hydrogen production rate"} in data["objectives"]
-    assert {"x1": 0.5, "objective_value": 100.0} in data["results"]
+    assert {"name": "ratio_of_RuO2", "lower_bound": 0.0, "upper_bound": 1.0} in data[
+        "variables"
+    ]
+    assert {"name": "hydrogen_production_rate"} in data["objectives"]
+    assert {
+        "variables": {"ratio_of_IrO2": 0.5, "ratio_of_RuO2": 0.3},
+        "objective_value": 100.0,
+    } in data["results"]
 
-    # Clean up: Delete the test experiment
-    try:
-        await storage.delete_experiment("test_exp8")
-        logger.debug("Cleaned up test_exp from test_get_experiment")
-    except Exception as e:
-        logger.error(f"Failed to clean up test_exp8: {str(e)}")
+    await storage.delete_experiment(experiment_name)
+    logger.debug(f"Cleaned up {experiment_name}")
 
 
 @pytest.mark.asyncio
-async def test_delete_experiment(dependencies, monkeypatch, tmp_path):
-    """Test deleting an experiment."""
-    storage, _ = dependencies
+async def test_delete_experiment(storage, monkeypatch):
+    experiment_name = f"test_exp_{uuid.uuid4().hex}"
 
     def mock_get_storage():
         return storage
 
+    def mock_get_optimizer(
+        experiment_name: str, storage: DatabaseStorage = mock_get_storage()
+    ):
+        return BayesianOptimizer(
+            pbounds={"ratio_of_IrO2": (0.0, 1.0), "ratio_of_RuO2": (0.0, 1.0)}
+        )
+
     monkeypatch.setattr(
         "hydrocata.api.routers.experiments.get_storage", mock_get_storage
     )
-
-    client.post("/api/v1/experiments", json={"name": "test_exp9"})
-    client.post(
-        "/api/v1/experiments/test_exp9/results",
-        json={"x1": 0.5, "objective_value": 100.0},
+    monkeypatch.setattr(
+        "hydrocata.api.routers.experiments.get_optimizer", mock_get_optimizer
     )
 
-    response = client.get("/api/v1/experiments/test_exp9")
+    client.post("/api/v1/experiments", json={"name": experiment_name})
+    client.post(
+        f"/api/v1/experiments/{experiment_name}/variables",
+        json={"name": "ratio_of_IrO2", "lower_bound": 0.0, "upper_bound": 1.0},
+    )
+    client.post(
+        f"/api/v1/experiments/{experiment_name}/variables",
+        json={"name": "ratio_of_RuO2", "lower_bound": 0.0, "upper_bound": 1.0},
+    )
+    client.post(
+        f"/api/v1/experiments/{experiment_name}/results",
+        json={
+            "variables": {"ratio_of_IrO2": 0.5, "ratio_of_RuO2": 0.3},
+            "objective_value": 100.0,
+        },
+    )
+
+    response = client.get(f"/api/v1/experiments/{experiment_name}")
+    logger.debug(f"Get experiment response: {response.json()}")
     assert response.status_code == 200
     assert len(response.json()["results"]) >= 1
 
-    response = client.delete("/api/v1/experiments/test_exp9")
+    response = client.delete(f"/api/v1/experiments/{experiment_name}")
     assert response.status_code == 200
-    assert response.json() == {"message": "Experiment 'test_exp9' deleted"}
+    assert response.json() == {"message": f"Experiment '{experiment_name}' deleted"}
 
-    response = client.get("/api/v1/experiments/test_exp9")
+    response = client.get(f"/api/v1/experiments/{experiment_name}")
+    logger.debug(f"Get experiment after delete response: {response.json()}")
     assert response.status_code == 500
+    assert "not found" in response.json().get("detail", "").lower()
 
-    # Clean up: Already deleted by the test, but ensure no residual data
     try:
-        await storage.delete_experiment("test_exp9")
-        logger.debug(
-            "Attempted cleanup of test_exp9 from test_delete_experiment (may already be deleted)"
-        )
+        await storage.delete_experiment(experiment_name)
+        logger.debug(f"Attempted cleanup of {experiment_name}")
     except Exception as e:
-        logger.debug(f"No cleanup needed for test_exp9: {str(e)}")
+        logger.debug(f"No cleanup needed for {experiment_name}: {str(e)}")
 
 
 @pytest.mark.asyncio
 async def test_health_check():
-    """Test the health check endpoint."""
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "healthy"}

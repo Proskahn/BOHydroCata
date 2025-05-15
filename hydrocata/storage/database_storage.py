@@ -2,10 +2,11 @@ from sqlalchemy import create_engine, Column, Integer, Float, String, ForeignKey
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.sql import select, delete
-from typing import List, Tuple, Dict
+from typing import List, Dict, Any
 import aiosqlite
 import logging
 import os
+import json
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
@@ -15,7 +16,7 @@ Base = declarative_base()
 
 
 class DuplicateResultError(Exception):
-    """Exception raised when a duplicate x1 value is replaced."""
+    """Exception raised when a duplicate variables value is replaced."""
 
     pass
 
@@ -60,7 +61,7 @@ class Result(Base):
     __tablename__ = "results"
     id = Column(Integer, primary_key=True, index=True)
     experiment_id = Column(Integer, ForeignKey("experiments.id"), nullable=False)
-    x1 = Column(Float, nullable=False)
+    variables = Column(String, nullable=False)  # JSON string of variable values
     objective_value = Column(Float, nullable=False)
     experiment = relationship("Experiment", back_populates="results")
 
@@ -153,9 +154,9 @@ class DatabaseStorage:
                 raise
 
     async def add_experiment_result(
-        self, experiment_name: str, x1: float, objective_value: float
+        self, experiment_name: str, variables: Dict[str, float], objective_value: float
     ) -> None:
-        """Add an experimental result to an experiment, replacing if x1 exists."""
+        """Add an experimental result to an experiment, replacing if variables exist."""
         async with self.AsyncSessionLocal() as session:
             try:
                 experiment = await session.execute(
@@ -165,55 +166,73 @@ class DatabaseStorage:
                 if not experiment:
                     raise ValueError(f"Experiment '{experiment_name}' not found")
 
-                variable = await session.execute(
+                # Validate variable bounds
+                db_variables = await session.execute(
                     select(Variable).filter_by(experiment_id=experiment.id)
                 )
-                variable = variable.scalars().first()
-                if variable:
+                db_variables = db_variables.scalars().all()
+                variable_map = {v.name: v for v in db_variables}
+
+                for var_name, var_value in variables.items():
+                    if var_name not in variable_map:
+                        raise ValueError(
+                            f"Variable '{var_name}' not defined for experiment '{experiment_name}'"
+                        )
+                    variable = variable_map[var_name]
                     lower = (
                         variable.lower_bound
                         if variable.lower_bound is not None
-                        else 0.0
+                        else float("-inf")
                     )
                     upper = (
                         variable.upper_bound
                         if variable.upper_bound is not None
                         else float("inf")
                     )
-                    if not (lower <= x1 <= upper):
+                    if not (lower <= var_value <= upper):
                         raise ValueError(
-                            f"x1={x1} is outside bounds [{lower}, {upper}]"
+                            f"Variable '{var_name}' value {var_value} is outside bounds [{lower}, {upper}]"
                         )
 
+                # Convert variables dict to JSON string
+                variables_json = json.dumps(variables)
+
+                # Check for existing result
                 existing_result = await session.execute(
-                    select(Result).filter_by(experiment_id=experiment.id, x1=x1)
+                    select(Result).filter_by(
+                        experiment_id=experiment.id, variables=variables_json
+                    )
                 )
                 existing_result = existing_result.scalars().first()
                 if existing_result:
                     existing_result.objective_value = objective_value
                     await session.commit()
                     logger.debug(
-                        f"Replaced result: x1={x1}, objective_value={objective_value} for experiment '{experiment_name}'"
+                        f"Replaced result: variables={variables_json}, objective_value={objective_value} for experiment '{experiment_name}'"
                     )
                     raise DuplicateResultError(
-                        f"Duplicate x1={x1} found for experiment '{experiment_name}'. Replaced with objective_value={objective_value}."
+                        f"Duplicate variables {variables} found for experiment '{experiment_name}'. Replaced with objective_value={objective_value}."
                     )
 
                 result = Result(
-                    experiment_id=experiment.id, x1=x1, objective_value=objective_value
+                    experiment_id=experiment.id,
+                    variables=variables_json,
+                    objective_value=objective_value,
                 )
                 session.add(result)
                 await session.commit()
                 logger.debug(
-                    f"Added result: x1={x1}, objective_value={objective_value} to experiment '{experiment_name}'"
+                    f"Added result: variables={variables_json}, objective_value={objective_value} to experiment '{experiment_name}'"
                 )
             except Exception as e:
                 await session.rollback()
                 logger.error(f"Failed to add result: {str(e)}")
                 raise
 
-    async def delete_experiment_result(self, experiment_name: str, x1: float) -> None:
-        """Delete a specific result for an experiment based on x1."""
+    async def delete_experiment_result(
+        self, experiment_name: str, variables: Dict[str, float]
+    ) -> None:
+        """Delete a specific result for an experiment based on variables."""
         async with self.AsyncSessionLocal() as session:
             try:
                 experiment = await session.execute(
@@ -223,21 +242,26 @@ class DatabaseStorage:
                 if not experiment:
                     raise ValueError(f"Experiment '{experiment_name}' not found")
 
+                variables_json = json.dumps(variables)
                 result = await session.execute(
-                    select(Result).filter_by(experiment_id=experiment.id, x1=x1)
+                    select(Result).filter_by(
+                        experiment_id=experiment.id, variables=variables_json
+                    )
                 )
                 result = result.scalars().first()
                 if not result:
                     raise ValueError(
-                        f"Result with x1={x1} not found for experiment '{experiment_name}'"
+                        f"Result with variables {variables} not found for experiment '{experiment_name}'"
                     )
 
                 await session.execute(
-                    delete(Result).filter_by(experiment_id=experiment.id, x1=x1)
+                    delete(Result).filter_by(
+                        experiment_id=experiment.id, variables=variables_json
+                    )
                 )
                 await session.commit()
                 logger.debug(
-                    f"Deleted result: x1={x1} for experiment '{experiment_name}'"
+                    f"Deleted result: variables={variables_json} for experiment '{experiment_name}'"
                 )
             except Exception as e:
                 await session.rollback()
@@ -261,7 +285,7 @@ class DatabaseStorage:
                 logger.error(f"Failed to list experiments: {str(e)}")
                 raise
 
-    async def get_experiments(self, experiment_name: str) -> List[Tuple[float, float]]:
+    async def get_experiments(self, experiment_name: str) -> List[Dict[str, Any]]:
         """Retrieve all results for an experiment."""
         async with self.AsyncSessionLocal() as session:
             try:
@@ -272,7 +296,7 @@ class DatabaseStorage:
                 if not experiment:
                     raise ValueError(f"Experiment '{experiment_name}' not found")
                 result = await session.execute(
-                    select(Result.x1, Result.objective_value).filter_by(
+                    select(Result.variables, Result.objective_value).filter_by(
                         experiment_id=experiment.id
                     )
                 )
@@ -281,8 +305,11 @@ class DatabaseStorage:
                     f"Retrieved {len(experiments)} results for experiment '{experiment_name}'"
                 )
                 return [
-                    (float(x1), float(objective_value))
-                    for x1, objective_value in experiments
+                    {
+                        "variables": json.loads(variables),
+                        "objective_value": float(objective_value),
+                    }
+                    for variables, objective_value in experiments
                 ]
             except Exception as e:
                 logger.error(f"Failed to get experiments: {str(e)}")
@@ -325,7 +352,10 @@ class DatabaseStorage:
                     ],
                     "objectives": [{"name": o.name} for o in objectives],
                     "results": [
-                        {"x1": r.x1, "objective_value": r.objective_value}
+                        {
+                            "variables": json.loads(r.variables),
+                            "objective_value": r.objective_value,
+                        }
                         for r in results
                     ],
                 }

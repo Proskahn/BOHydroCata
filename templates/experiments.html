@@ -86,13 +86,12 @@
         <h3 class="text-xl font-semibold mb-4">Record Result</h3>
         <form id="result-form">
             <input type="hidden" id="result-experiment-name" name="experiment_name">
-            <div class="mb-4">
-                <label for="x1" class="block text-gray-700">x1 (Catalyst Ratio)</label>
-                <input type="number" id="x1" name="x1" step="any" class="w-full p-2 border rounded" required>
+            <div id="variables-container" class="mb-4">
+                <!-- Dynamically populated with variable inputs -->
             </div>
             <div class="mb-4">
                 <label for="objective-value" class="block text-gray-700">Objective Value</label>
-                <input type="number" id="objective-value" name="objective_value" step="any" class="w-full p-2 border rounded" required>
+                <input type="number" id="objective-value" name="objective_value" step="any" min="0.0001" class="w-full p-2 border rounded" required>
             </div>
             <div class="flex justify-end">
                 <button type="button" id="result-cancel" class="mr-2 px-4 py-2 text-gray-600 hover:text-gray-800">Cancel</button>
@@ -107,9 +106,8 @@
         <h3 class="text-xl font-semibold mb-4">Delete Result</h3>
         <form id="delete-result-form">
             <input type="hidden" id="delete-result-experiment-name" name="experiment_name">
-            <div class="mb-4">
-                <label for="delete-x1" class="block text-gray-700">x1 (Catalyst Ratio)</label>
-                <input type="number" id="delete-x1" name="x1" step="any" class="w-full p-2 border rounded" required>
+            <div id="delete-variables-container" class="mb-4">
+                <!-- Dynamically populated with variable inputs -->
             </div>
             <div class="flex justify-end">
                 <button type="button" id="delete-result-cancel" class="mr-2 px-4 py-2 text-gray-600 hover:text-gray-800">Cancel</button>
@@ -196,16 +194,54 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             document.querySelectorAll('.record-result-btn').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    document.getElementById('result-experiment-name').value = btn.dataset.name;
-                    resultModal.classList.remove('hidden');
+                btn.addEventListener('click', async () => {
+                    const experimentName = btn.dataset.name;
+                    document.getElementById('result-experiment-name').value = experimentName;
+                    // Fetch experiment variables
+                    try {
+                        const response = await fetch(`/api/v1/experiments/${experimentName}`);
+                        const data = await response.json();
+                        const variablesContainer = document.getElementById('variables-container');
+                        variablesContainer.innerHTML = '';
+                        data.variables.forEach(varObj => {
+                            const div = document.createElement('div');
+                            div.className = 'mb-2';
+                            div.innerHTML = `
+                                <label for="variables_${varObj.name}" class="block text-gray-700">${varObj.name}</label>
+                                <input type="number" id="variables_${varObj.name}" name="variables[${varObj.name}]" step="any" class="w-full p-2 border rounded" required>
+                            `;
+                            variablesContainer.appendChild(div);
+                        });
+                        resultModal.classList.remove('hidden');
+                    } catch (error) {
+                        alert('Error fetching experiment variables.');
+                    }
                 });
             });
 
             document.querySelectorAll('.delete-result-btn').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    document.getElementById('delete-result-experiment-name').value = btn.dataset.name;
-                    deleteResultModal.classList.remove('hidden');
+                btn.addEventListener('click', async () => {
+                    const experimentName = btn.dataset.name;
+                    document.getElementById('delete-result-experiment-name').value = experimentName;
+                    // Fetch experiment variables
+                    try {
+                        const response = await fetch(`/api/v1/experiments/${experimentName}`);
+                        const data = await response.json();
+                        const variablesContainer = document.getElementById('delete-variables-container');
+                        variablesContainer.innerHTML = '';
+                        data.variables.forEach(varObj => {
+                            const div = document.createElement('div');
+                            div.className = 'mb-2';
+                            div.innerHTML = `
+                                <label for="delete_variables_${varObj.name}" class="block text-gray-700">${varObj.name}</label>
+                                <input type="number" id="delete_variables_${varObj.name}" name="variables[${varObj.name}]" step="any" class="w-full p-2 border rounded" required>
+                            `;
+                            variablesContainer.appendChild(div);
+                        });
+                        deleteResultModal.classList.remove('hidden');
+                    } catch (error) {
+                        alert('Error fetching experiment variables.');
+                    }
                 });
             });
 
@@ -228,7 +264,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     try {
                         const response = await fetch(`/api/v1/experiments/${name}/recommend`);
                         const data = await response.json();
-                        alert(`Recommended x1: ${data.x1}`);
+                        const variablesStr = Object.entries(data.variables)
+                            .map(([key, value]) => `${key}: ${value}`)
+                            .join(', ');
+                        alert(`Recommended variables: ${variablesStr}`);
                     } catch (error) {
                         alert('Error fetching recommendation.');
                     }
@@ -330,22 +369,33 @@ document.addEventListener('DOMContentLoaded', () => {
     resultForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const formData = new FormData(resultForm);
+        const variables = {};
+        formData.forEach((value, key) => {
+            if (key.startsWith('variables[')) {
+                const varName = key.match(/variables\[(.+)\]/)[1];
+                variables[varName] = parseFloat(value);
+            }
+        });
         const data = {
-            x1: parseFloat(formData.get('x1')),
+            variables,
             objective_value: parseFloat(formData.get('objective_value'))
         };
         const experimentName = formData.get('experiment_name');
         try {
-            await fetch(`/api/v1/experiments/${experimentName}/results`, {
+            const response = await fetch(`/api/v1/experiments/${experimentName}/results`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
             });
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || 'Error recording result.');
+            }
             resultForm.reset();
             resultModal.classList.add('hidden');
             fetchExperiments();
         } catch (error) {
-            alert('Error recording result.');
+            alert(error.message || 'Error recording result.');
         }
     });
 
@@ -358,21 +408,32 @@ document.addEventListener('DOMContentLoaded', () => {
     deleteResultForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         const formData = new FormData(deleteResultForm);
+        const variables = {};
+        formData.forEach((value, key) => {
+            if (key.startsWith('variables[')) {
+                const varName = key.match(/variables\[(.+)\]/)[1];
+                variables[varName] = parseFloat(value);
+            }
+        });
         const data = {
-            x1: parseFloat(formData.get('x1'))
+            variables
         };
         const experimentName = formData.get('experiment_name');
         try {
-            await fetch(`/api/v1/experiments/${experimentName}/results`, {
+            const response = await fetch(`/api/v1/experiments/${experimentName}/results`, {
                 method: 'DELETE',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
             });
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || 'Error deleting result.');
+            }
             deleteResultForm.reset();
             deleteResultModal.classList.add('hidden');
             fetchExperiments();
         } catch (error) {
-            alert('Error deleting result.');
+            alert(error.message || 'Error deleting result.');
         }
     });
 
