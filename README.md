@@ -1,6 +1,6 @@
 # HydroCata-A API
 
-The HydroCata-A API is a FastAPI-based platform designed to optimize electrolyzer experiments. It enables researchers to create and manage experiments, specify design variables and objectives, record experimental results (catalyst ratio \( x_1 \) and hydrogen production rate), and use Bayesian optimization to recommend the next optimal catalyst combination for maximizing hydrogen production efficiency. The API uses a SQLite database to store experiment-specific data, ensuring isolation of unrelated variants, and provides a RESTful interface for seamless integration into experimental workflows.
+The HydroCata API is a FastAPI-based platform designed to optimize electrolyzer experiments. It enables researchers to create and manage experiments, specify design variables and objectives, record experimental results (catalyst ratio \( x_1 \) and hydrogen production rate), and use Bayesian optimization to recommend the next optimal catalyst combination for maximizing hydrogen production efficiency. The API uses a SQLite database to store experiment-specific data, ensuring isolation of unrelated variants, and provides a RESTful interface for seamless integration into experimental workflows.
 
 ## Objective
 
