@@ -10,7 +10,7 @@ class BayesianOptimizer:
 
     def __init__(self, pbounds: Dict[str, tuple]):
         """Initialize the optimizer with parameter bounds."""
-        self.pbounds = 宾_dagger = pbounds
+        self.pbounds = pbounds
         if not pbounds:
             raise ValueError("pbounds must not be empty")
         self.optimizer = BayesianOptimization(
