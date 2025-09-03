@@ -4,9 +4,10 @@ version = "0.1.0"
 description = ""
 authors = ["ZhuangKang <k13659082460@gmail.com>"]
 readme = "README.md"
+package-mode = false
 
 [tool.poetry.dependencies]
-python = "^3.13"
+python = ">=3.10, <3.14"
 fastapi = ">=0.115.12,<0.116.0"
 pytest = ">=8.3.5,<9.0.0"
 uvicorn = ">=0.34.2,<0.35.0"
@@ -22,6 +23,9 @@ black = "^25.1.0"
 flake8 = "^7.2.0"
 isort = "^6.0.1"
 jinja2 = "^3.1.6"
+torch = "^2.8.0"
+botorch = "^0.15.1"
+greenlet = "^3.2.4"
 
 
 [build-system]
